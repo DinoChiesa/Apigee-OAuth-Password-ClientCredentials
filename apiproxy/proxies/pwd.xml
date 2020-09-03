@@ -1,0 +1,142 @@
+<ProxyEndpoint name='pwd'>
+  <Description>the proxy endpoint for dispensing tokens via password grant</Description>
+  <HTTPProxyConnection>
+    <BasePath>/oauth2/pwd</BasePath>
+    <VirtualHost>secure</VirtualHost>
+  </HTTPProxyConnection>
+
+  <FaultRules/>
+
+  <PreFlow name='PreFlow'>
+      <Request/>
+      <Response/>
+  </PreFlow>
+  <PostFlow name='PostFlow'>
+      <Request/>
+      <Response>
+        <Step><Name>AM-CleanResponseHeaders</Name></Step>
+        <Step>
+          <Name>JS-GroomTokenResponse</Name>
+          <Condition>request.formparam.grant_type = "password"</Condition>
+        </Step>
+      </Response>
+  </PostFlow>
+
+  <Flows>
+    <Flow name='/token (local mock user DB)'>
+      <Description>dispense tokens for OAuth2.0, for password grant</Description>
+      <!--
+          An example request is like this:
+
+          curl -i -X POST -H 'content-type: application/x-www-form-urlencoded' \
+            -u ${client_id}:${client_secret} \
+            https://$ORG-$ENV.apigee.net/oauth2/pwd/token \
+            -d 'grant_type=password&username=dino@apigee.comtanyap&password=IloveAPIs'
+
+          The resulting token will have an expiry, and a set of roles,
+          as returned by the user authentication service.
+
+      -->
+      <Request>
+        <Step>
+          <!-- basic validation of the inbound request. Is it well formed? -->
+          <Name>RF-InvalidGrantType</Name>
+          <Condition>request.formparam.grant_type != "password"</Condition>
+        </Step>
+        <Step>
+          <!-- this step sets context variable 'user_is_authentic' to true or false. -->
+          <Name>JS-ValidateUser</Name>
+        </Step>
+        <Step>
+          <Name>RF-AuthenticationFailed</Name>
+          <Condition>user_is_authentic = false</Condition>
+        </Step>
+        <Step>
+          <!-- this policy returns a payload immediately -->
+          <Name>OAuthV2-GenerateAccessToken-PG</Name>
+        </Step>
+      </Request>
+
+      <Response/>
+
+      <Condition>(proxy.pathsuffix MatchesPath "/token") and (request.verb = "POST")</Condition>
+    </Flow>
+
+    <Flow name='/token (remote user DB)'>
+      <Description>dispense tokens for OAuth2.0, for password grant (Case 2)</Description>
+      <!--
+          An example request is like this:
+
+          curl -i -X POST -H 'content-type: application/x-www-form-urlencoded' \
+            -u ${client_id}:${client_secret} \
+            https://$ORG-$ENV.apigee.net/oauth2/pwd/token2 \
+            -d 'grant_type=password&username=dino@apigee.comtanyap&password=IloveAPIs'
+
+          The resulting token will have an expiry, and a set of roles,
+          as returned by the user authentication service.
+
+      -->
+      <Request>
+        <Step>
+          <!-- basic validation of the inbound request. Is it well formed? -->
+          <Name>RF-InvalidGrantType</Name>
+          <Condition>request.formparam.grant_type != "password"</Condition>
+        </Step>
+        <Step>
+          <!-- this step calls out to a remote user authn service -->
+          <Name>SC-ValidateUser</Name>
+        </Step>
+        <Step>
+          <!-- userAuthResponse holds the response from the remote service -->
+          <Name>RF-AuthenticationFailed</Name>
+          <Condition>NOT (userAuthResponse.status.code = 200)</Condition>
+        </Step>
+        <Step>
+          <Name>JS-ExtractRoles</Name>
+        </Step>
+        <Step>
+          <!-- this policy returns a payload immediately -->
+          <Name>OAuthV2-GenerateAccessToken-PG</Name>
+        </Step>
+      </Request>
+
+      <Response/>
+
+      <Condition>(proxy.pathsuffix MatchesPath "/token2") and (request.verb = "POST")</Condition>
+    </Flow>
+
+    <Flow name='revoke a token'>
+      <!-- see https://tools.ietf.org/html/rfc7009#section-2.1 -->
+      <!-- this allows a user to revoke a token -->
+      <Request>
+        <Step><Name>BasicAuth-1</Name></Step>
+        <Step><Name>AE-ConsumerKey</Name></Step>
+        <Step><Name>Extract-ConsumerSecret</Name></Step>
+        <Step>
+          <Name>RF-NotAuthorized</Name>
+          <Condition>inbound_client_secret != extracted_secret</Condition>
+        </Step>
+        <Step><Name>OAuthV2-InvalidateToken-1</Name></Step>
+      </Request>
+
+      <Response>
+        <Step><Name>AM-NoContent</Name></Step>
+      </Response>
+      <Condition>(proxy.pathsuffix MatchesPath "/revoke") and (request.verb = "POST")</Condition>
+    </Flow>
+
+    <Flow name='unknown request'>
+      <Request>
+        <Step><Name>RF-UnknownRequest</Name></Step>
+      </Request>
+      <Response/>
+    </Flow>
+
+  </Flows>
+
+  <!-- There is no backend target. Responses for oauth token generation and
+       refresh are direct from this API proxy.
+  -->
+  <RouteRule name='NoRouteRule'/>
+
+</ProxyEndpoint>

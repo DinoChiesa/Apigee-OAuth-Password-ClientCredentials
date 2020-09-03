@@ -1,0 +1,6 @@
+<Javascript name='JS-ExtractRoles' timeLimit='200' >
+  <Source>
+var r = JSON.parse(context.getVariable('userAuthResponse.content'));
+context.setVariable('user_roles', r.user.groups.join(','));
+ </Source>
+</Javascript>
